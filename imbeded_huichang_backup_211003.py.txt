@@ -1,0 +1,2914 @@
+import numpy as np
+import argparse
+import math
+import cv2
+import serial
+import time
+import sys
+from threading import Thread
+
+serial_use = 1
+serial_port = None
+Read_RX = 0
+receiving_exit = 1
+threading_Time = 0.01
+
+W_View_size = 320
+H_View_size = int(W_View_size / 1.333)  # 240
+
+
+
+cap = cv2.VideoCapture(0)
+cap.set(3, W_View_size)
+cap.set(4, H_View_size)
+#cap.set(5, FPS)
+
+
+
+
+View_select = 1
+
+Serial_stat = 0
+Serial_stat_old = Serial_stat
+
+# ----------------------Yellow----------------------
+y_H_down = 11
+y_H_up = 41
+y_S_down = 90
+y_S_up = 255
+y_V_down = 0
+y_V_up = 255
+# ----------------------Red----------------------
+r_H_down = 150
+r_H_up = 13
+r_S_down = 120
+r_S_up = 255
+r_V_down = 40
+r_V_up = 200#115
+# ----------------------Blue----------------------
+b_H_down = 97
+b_H_up = 140
+b_S_down = 80
+b_S_up = 255
+b_V_down = 40
+b_V_up = 225 #130
+# ----------------------Green----------------------
+g_H_down = 45
+g_H_up = 110#90
+g_S_down = 80
+g_S_up = 255
+g_V_down = 0
+g_V_up = 255
+# ----------------------Black----------------------
+k_H_down = 0
+k_H_up = 180
+k_S_down = 0
+k_S_up = 65
+k_V_down = 0
+k_V_up = 126
+
+prevtime =0
+curtime =0
+# *******************************************************
+# *******************************************************
+
+def TX_data_py2(ser, one_byte):  # one_byte= 0~255
+
+    # ser.write(chr(int(one_byte)))          #python2.7
+    ser.write(serial.to_bytes([one_byte]))  # python3
+
+
+def RX_data(ser):
+    if ser.inWaiting() > 0:
+        result = ser.read(1)
+        RX = ord(result)
+        return RX
+    else:
+        return 0
+
+
+def Sending(num):
+    
+    global curtime, prevtime
+    TX_data_py2(serial_port, int(num))
+    #if curtime - prevtime > 0.5 :
+    print("Send : " + str(num))
+    #    prevtime = curtime
+    time.sleep(0.01)
+
+
+def Receiving(ser):
+    global receiving_exit
+    global psdnum
+    
+    psdnum = 0
+    
+    while True:
+        time.sleep(threading_Time)
+        while ser.inWaiting() > 0:
+            print("receive")
+            result = ser.read(1)
+            RX = ord(result)
+            if RX != "0": 
+                psdnum = RX
+                print("psd=" + str(RX))
+            
+def Serial_L_and_R(num):  # 6 : left // 7 : right
+    global Serial_stat
+    global Serial_stat_old
+
+    Serial_stat = num
+    Sending(Serial_stat)
+
+
+def Serial_PSD():
+    global Serial_stat
+    global Serial_stat_old
+
+    Serial_stat = 36
+    Sending(Serial_stat)
+    #ReceivingPSD(serial_port)
+
+# ---------------------------------------------
+def nothing(x):
+    pass
+
+
+def roi(img, vertices):
+    mask = np.zeros_like(img)
+    cv2.fillPoly(mask, vertices, 255)
+    masked = cv2.bitwise_and(img, mask)
+    return masked
+# .......................................................................................
+
+
+# .....  num=16  ..........................................................................    
+def Line_giok():  # line_T
+    global num
+    global Serial_stat_old
+    global count
+    global i_p
+    global psdnum
+    
+    psdFlag = 0
+    escape = 0
+    
+    reviseRoom_Flag = 0
+    tiltFlag = 0
+    tilt2Flag = 0
+    
+    TFlag = 0
+    reviseFlag = 1
+    reviseFlag2 = 1
+    
+    T_detectFlag = 0
+    T_detectEscape = 0
+    cxSum = 0
+    cySum = 0
+    cx3Sum = 0
+    cy3Sum = 0
+    cx4Sum = 0
+    cy4Sum = 0
+    cx5Sum = 0
+    cy5Sum = 0    
+    cx6Sum = 0
+    cy6Sum = 0    
+    
+    sumtx = 0
+    sumty = 0
+    
+    sumtiltData = 0
+    
+    area = 0
+    
+    readytoT =0
+    time.sleep(1)
+    Serial_L_and_R(54)#8¬ ° Y
+    time.sleep(1)
+    Serial_L_and_R(34)#8¬ X¥ 80
+    time.sleep(2)
+    centervsX=0
+    centervsY=40
+    count = 0
+    
+    if i_p>=3:#Ð¬D Ä)Xt  Xp
+        while True:
+            Serial_L_and_R(49)#ô¥ Ä  xL Xä  x¬t 8ô
+            time.sleep(8)
+            num = 14
+            break
+    else:
+        while True:
+            
+            Serial_L_and_R(34)
+            cxSum = 0
+            cySum = 0
+            cx3Sum = 0
+            cy3Sum = 0
+            cx4Sum = 0
+            cy4Sum = 0
+            cx5Sum = 0
+            cy5Sum = 0    
+            cx6Sum = 0
+            cy6Sum = 0 
+
+            sumtiltData = 0
+            
+            if T_detectEscape == 1 and escape == 1:
+                num = 8
+                break
+            
+            
+            if T_detectEscape == 1:
+                
+                Serial_L_and_R(9)
+                
+                while True:
+                    
+                    Serial_L_and_R(9)
+                    cxSum = 0
+                    cySum = 0
+
+
+                    Serial_PSD()
+                                 
+                
+                    for i in range(30):
+                        
+                        ret, img_color = cap.read()
+                        if not ret:
+                            continue
+                        #count += 1
+                        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+                        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+                        b_mask = cv2.inRange(img_hsv, np.array([b_H_down, b_S_down, b_V_down]), np.array([b_H_up, b_S_up, b_V_up]))
+                        r_mask = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+                        sumMask = b_mask | r_mask
+                        
+                        mask = cv2.bitwise_and(img_color, img_color, mask=sumMask)
+                        
+                        
+
+                        img_gray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                        
+                        vertices_2 = np.array([[0 + 25, 0], [W_View_size - 25, 0], [W_View_size - 25, 240], [0 + 25, 240]], np.int32)
+                        roi_2 = roi(img_gray, [vertices_2])
+                        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)                
+                    
+                        if len(contours2) > 0:
+                            
+                            cv2.drawContours(sumMask, contours2[0], -1, (0,255,0), 2)
+                            cnt2 = contours2[0]
+                            #cnt = contours[0]
+                            hull2 = cv2.convexHull(cnt2)
+                            mmt2 = cv2.moments(hull2)
+                            #mmt2 = cv2.moments(cnt)
+                            tiltData = contours2[0][0][0][0]
+                            #area = len(contours2)
+                            sumtiltData = sumtiltData + tiltData
+                            
+
+                            if mmt2['m00'] > 0:
+                                cx2 = int(mmt2['m10'] / mmt2['m00'])
+                                cy2 = int(mmt2['m01'] / mmt2['m00'])
+                                
+                                cxSum = cxSum + cx2
+                                cySum = cySum + cy2
+                                
+                    cx2 = int(cxSum / 30)
+                    cy2 = int(cySum / 30)
+                    
+                    
+                    
+                    if psdFlag == 1:
+                        
+                        if int(psdnum) > 140:
+                            num = 8
+                            escape = 1
+                            break
+                        
+                        else:
+                            print(int(psdnum))                            
+                            Serial_L_and_R(27)
+                            time.sleep(0.3)                        
+                        
+                        
+                        
+                    else:         
+                        if cx2 > 105 and cx2 < 135:
+                            psdFlag = 1
+                        
+                        elif cx2 > 0 and cx2 < 105:
+                            print(cx2)
+                            Serial_L_and_R(21)
+                            
+                        elif cx2 > 135:
+                            print(cx2)
+                            Serial_L_and_R(22)
+                    
+                    
+                    
+                    cv2.waitKey(1)
+                    cv2.imshow('area', sumMask)                
+                
+                
+            else:
+                
+                for i in range(30):
+                    
+                    ret, img_color = cap.read()
+                    if not ret:
+                        continue
+                    #count += 1
+                    img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+                    img_hsv = cv2.medianBlur(img_hsv, 5)
+
+                    y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+                    img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+                    img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+                    
+                    vertices_2 = np.array([[0 + 25, 0], [W_View_size - 25, 0], [W_View_size - 25, 240], [0 + 25, 240]], np.int32)
+                    roi_2 = roi(img_gray, [vertices_2])
+                    contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+                    vertices_3 = np.array([[0, 0], [50, 0], [50, 240], [0, 240]], np.int32)
+                    roi_3 = roi(img_gray, [vertices_3])
+                    contours3, _ = cv2.findContours(roi_3, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+                    vertices_5 = np.array([[0, 0], [320, 0], [320, 60], [0, 60]], np.int32)
+                    roi_5 = roi(img_gray, [vertices_5])
+                    contours5, _ = cv2.findContours(roi_5, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                    
+                    
+                    vertices_6 = np.array([[0, 170], [320, 170], [320, 210], [0, 210]], np.int32)
+                    roi_6 = roi(img_gray, [vertices_6])
+                    contours6, _ = cv2.findContours(roi_6, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)                
+
+                    
+                    #if count >= 50:
+                    area2 = len(contours2)
+                    if len(contours2) > 0:
+                        cnt2 = contours2[0]
+                        #cnt = contours[0]
+                        hull2 = cv2.convexHull(cnt2)
+                        mmt2 = cv2.moments(hull2)
+                        #mmt2 = cv2.moments(cnt)
+                        tiltData = contours2[0][0][0][0]
+                        #area = len(contours2)
+                        sumtiltData = sumtiltData + tiltData
+                        
+
+                        if mmt2['m00'] > 0:
+                            cx2 = int(mmt2['m10'] / mmt2['m00'])
+                            cy2 = int(mmt2['m01'] / mmt2['m00'])
+                            
+                            cxSum = cxSum + cx2
+                            cySum = cySum + cy2
+                            
+
+                    if len(contours3) > 0:
+                        
+                        cv2.drawContours(img_yellow, contours3[0], -1, (0,255,0), 2)
+                        
+                        cnt3 = contours3[0]
+                        hull3 = cv2.convexHull(cnt3)
+                        mmt3 = cv2.moments(hull3)
+
+                        if mmt3['m00'] > 0:
+                            cx3 = int(mmt3['m10'] / mmt3['m00'])
+                            cy3 = int(mmt3['m01'] / mmt3['m00'])
+                            
+                            cx3Sum = cx3Sum + cx3
+                            cy3Sum = cy3Sum + cy3
+                            
+                            
+                    if len(contours5) > 0:
+                        
+                        cv2.drawContours(img_yellow, contours5[0], -1, (0,255,0), 2)
+                        
+                        cnt5 = contours5[0]
+                        hull5 = cv2.convexHull(cnt5)
+                        mmt5 = cv2.moments(hull5)
+
+                        if mmt5['m00'] > 0:
+                            cx5 = int(mmt5['m10'] / mmt5['m00'])
+                            cy5 = int(mmt5['m01'] / mmt5['m00'])
+                            
+                            cx5Sum = cx5Sum + cx5
+                            cy5Sum = cy5Sum + cy5                        
+                            
+                    if len(contours6) > 0:
+                        
+                        cv2.drawContours(img_yellow, contours6[0], -1, (0,255,0), 2)
+                        
+                        cnt6 = contours6[0]
+                        hull6 = cv2.convexHull(cnt6)
+                        mmt6 = cv2.moments(hull6)
+
+                        if mmt6['m00'] > 0:
+                            cx6 = int(mmt6['m10'] / mmt6['m00'])
+                            cy6 = int(mmt6['m01'] / mmt6['m00'])
+                            
+                            cx6Sum = cx6Sum + cx6
+                            cy6Sum = cy6Sum + cy6                        
+                            
+                            
+                            
+                            
+                cx2 = int(cxSum / 30)
+                cy2 = int(cySum / 30)
+                
+                cx3 = int(cx3Sum / 30)
+                cy3 = int(cy3Sum / 30)
+                
+                cx5 = int(cx5Sum / 30)
+                cy5 = int(cy5Sum / 30)
+                
+                cx6 = int(cx6Sum / 30)
+                cy6 = int(cy6Sum / 30)            
+                
+                #cx4 = int(cx4Sum / 30)
+                #cy4 = int(cy4Sum / 30)
+                
+                tiltData = int(sumtiltData / 30)
+                
+                #Serial_PSD()
+                #print(int(psdnum))
+                
+
+                ##############################################################
+                
+                if tilt2Flag == 1:
+                    
+                    if cy3 < 135:
+                        T_detectEscape = 1
+                        
+                    else:
+                        print(cy3)
+                        Serial_L_and_R(21)
+                        
+                    
+                
+                else:         
+                    if reviseFlag == 1:
+                        
+                        if cx5 - cx6 > 0 and cx5 - cx6 > 20:
+                            Serial_L_and_R(22)
+                            time.sleep(1)
+                            
+                        elif cx5 - cx6 < 0 and cx5 - cx6 < -20:
+                            Serial_L_and_R(21)
+                            time.sleep(1)
+                        
+                        else:
+                            reviseFlag = 0
+                    
+                    
+                    else:
+                        
+                        if reviseFlag2 == 1:          
+                            if cx2 > 0 and cx2 <= 130:
+                                Serial_L_and_R(60)#|½ 4
+                                print(cx2,cy2)
+                                
+                            elif cx2 >= 190:
+                                Serial_L_and_R(61)#$x½ 4
+                                print(cx2,cy2)
+                                
+                            else:
+                                reviseFlag2 = 0
+                                
+                        else:
+                            
+                        
+                            if len(contours3) > 0:
+                                
+                                TFlag = 1;
+                                #print(cx3, cy3)
+                                
+                                if cy3 > 140 and TFlag == 1:
+                                    Serial_L_and_R(27)#8ìp
+                                    time.sleep(1) 
+                                    Serial_L_and_R(27)#8ìp
+                                    time.sleep(1)
+                                    Serial_L_and_R(27)#8ìp
+                                    time.sleep(1)
+                                    Serial_L_and_R(27)#8ìp
+                                    time.sleep(1)
+
+                                    Serial_L_and_R(27)#8ìp
+                                    time.sleep(1)
+                                    Serial_L_and_R(27)#8ìp
+                                    time.sleep(1)
+                                    Serial_L_and_R(21)#8ìp
+                                    time.sleep(0.5)                                   
+                                    Serial_L_and_R(21)#8ìp
+                                    time.sleep(0.5)
+                                    Serial_L_and_R(21)#8ìp
+                                    time.sleep(0.5)                                    
+                                    #Serial_L_and_R(15)
+                                    #time.sleep(1)
+                                    #Serial_L_and_R(27)#8ìp
+                                    #time.sleep(1)
+                                    #Serial_L_and_R(27)#8ìp
+                                    #time.sleep(1)
+                                    
+                                    TFlag = 0
+                                    #T_detectEscape = 1
+                                    tilt2Flag = 1
+                                    #num = 8
+                                    #break
+                                    
+                                    #while True:
+                                    #    print("ok")
+                                
+                                
+                                
+                                
+                                if cx2 < 0 and cx2 <= 110:
+                                    Serial_L_and_R(60)#|½ 4
+                                    print(cx2,cy2)
+                                    
+                                elif cx2 >= 160:
+                                    Serial_L_and_R(61)#$x½ 4
+                                    print(cx2,cy2)
+                                else:
+                                    #if  cx2 > tiltData and  (cx2-tiltData) > 70:   ## |½<\ 0¸´Ð
+                                    #    Serial_L_and_R(58)
+                                    #elif cx2 < tiltData and (tiltData-cx2) > 70:   ## $x½<\ 0¸´Ð
+                                    #    Serial_L_and_R(59)
+                                    
+                                    Serial_L_and_R(27)#8ìp
+                                    print(cx2,cy2)
+                                    time.sleep(1)
+                                
+                                
+                            else:
+                                
+                                if area2 <= 0:
+                                    Serial_L_and_R(26)# ¤\ 
+                                    
+                                if cx5 - cx6 > 0 and cx5 - cx6 > 35:
+                                    Serial_L_and_R(22)
+                                    time.sleep(1)
+                                    
+                                elif cx5 - cx6 < 0 and cx5 - cx6 < -35:
+                                    Serial_L_and_R(21)
+                                    time.sleep(1)
+                                
+                                #if len(contours3) <= 0:    
+                                #    if cy2 > 180: #210
+                                        #Serial_L_and_R(1)#ä Hp 
+                                        #num = 3
+                                #        print(cx2, cy2)
+                                        #break
+                                        
+                                if cx2 > 0 and cx2 <= 130:
+                                    Serial_L_and_R(60)#|½ 4
+                                    print(cx2,cy2)
+                                    
+                                elif cx2 >= 190:
+                                    Serial_L_and_R(61)#$x½ 4
+                                    print(cx2,cy2)
+                                else:
+                                    
+                                    Serial_L_and_R(27)#8ìp
+                                    print(cx2,cy2)
+                                    time.sleep(1)
+                                    #print(cx2 - tiltData)
+                    
+
+                cv2.waitKey(1)
+                cv2.imshow('line', img_yellow)
+
+        cv2.destroyAllWindows()
+
+
+
+# .....  num=0  ..........................................................................
+
+def Line_T():  # line_T
+    global num
+    global Serial_stat_old
+    global count
+    global i_p
+    global psdnum
+    
+    tiltFlag = 0
+    T2_flag = 0
+    T_detectFlag = 0
+    T_detectEscape = 0
+    cxSum = 0
+    cySum = 0
+    cx3Sum = 0
+    cy3Sum = 0
+    cx4Sum = 0
+    cy4Sum = 0
+    
+    sumtx = 0
+    sumty = 0
+    
+    sumtiltData = 0
+    
+    area = 0
+    
+    readytoT =0
+    time.sleep(1)
+    Serial_L_and_R(54)#8¬ ° Y
+    time.sleep(1)
+    Serial_L_and_R(34)#8¬ X¥ 80
+    time.sleep(2)
+    centervsX=0
+    centervsY=40
+    count = 0
+    
+    if i_p>=3:#Ð¬D Ä)Xt  Xp
+        while True:
+            Serial_L_and_R(49)#ô¥ Ä  xL Xä  x¬t 8ô
+            time.sleep(8)
+            num = 14
+            break
+    else:
+        while True:
+            Serial_L_and_R(34)
+            cxSum = 0
+            cySum = 0
+            sumtiltData = 0
+            
+            if T2_flag == 1:
+                num = 1
+                break
+            
+            for i in range(30):
+                
+                ret, img_color = cap.read()
+                if not ret:
+                    continue
+                #count += 1
+                img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+                img_hsv = cv2.medianBlur(img_hsv, 5)
+
+                y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+                img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+                img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+                
+                vertices_2 = np.array(
+                    [[0 + 25, 0], [W_View_size - 25, 0], [W_View_size - 25, 240], [0 + 25, 240]],
+                    np.int32)
+                roi_2 = roi(img_gray, [vertices_2])
+                contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                #contours, _ = cv2.findContours(y_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                
+                #if count >= 50:
+                area = len(contours2)
+                if len(contours2) > 0:
+                    cnt2 = contours2[0]
+                    #cnt = contours[0]
+                    hull2 = cv2.convexHull(cnt2)
+                    mmt2 = cv2.moments(hull2)
+                    #mmt2 = cv2.moments(cnt)
+                    tiltData = contours2[0][0][0][0]
+                    #area = len(contours2)
+                    sumtiltData = sumtiltData + tiltData
+                    
+
+                    if mmt2['m00'] > 0:
+                        cx2 = int(mmt2['m10'] / mmt2['m00'])
+                        cy2 = int(mmt2['m01'] / mmt2['m00'])
+                        
+                        cxSum = cxSum + cx2
+                        cySum = cySum + cy2
+                        time.sleep(0.0001)
+                        
+                        
+            cx2 = int(cxSum / 30)
+            cy2 = int(cySum / 30)
+            tiltData = int(sumtiltData / 30)
+            
+            Serial_PSD()
+            #print(int(psdnum))
+            
+            
+            if T_detectFlag == 1:
+                tiltFlag = 0
+                Serial_L_and_R(35)#8¬ X¥ 80
+                time.sleep(1)
+                
+                while True:
+                    Serial_L_and_R(35)
+                    cxSum = 0
+                    cySum = 0
+                    cx3Sum = 0
+                    cy3Sum = 0
+                    cx4Sum = 0
+                    cy4Sum = 0
+                    
+                    sumtx = 0
+                    sumty = 0
+                    sumtiltData = 0
+                    
+                    for i in range(30):
+                    
+                        ret, img_color = cap.read()
+                        if not ret:
+                            continue
+                        #count += 1
+                        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+                        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+                        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+                        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+                        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+                        
+                        vertices_2 = np.array(
+                            [[0 + 25, 0], [W_View_size - 25, 0], [W_View_size - 25, 240], [0 + 25, 240]],
+                            np.int32)
+                        roi_2 = roi(img_gray, [vertices_2])
+                        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        
+                        vertices_3 = np.array([[0, 0], [140, 0], [140, H_View_size], [0, H_View_size]], np.int32)
+                        roi_3 = roi(img_gray, [vertices_3])
+                        contours3, _ = cv2.findContours(roi_3, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+                        vertices_4 = np.array(
+                            [[180, 0], [W_View_size, 0], [W_View_size, H_View_size], [180, H_View_size]],
+                            np.int32)
+                        roi_4 = roi(img_gray, [vertices_4])
+                        contours4, _ = cv2.findContours(roi_4, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)                        
+
+                        if len(contours3) > 0:
+                            cnt3 = contours3[0]
+                            hull3 = cv2.convexHull(cnt3)
+                            mmt3 = cv2.moments(hull3)
+                            video_on = True
+                            if mmt3['m00'] > 0:
+                                cx3 = int(mmt3['m10'] / mmt3['m00'])
+                                cy3 = int(mmt3['m01'] / mmt3['m00'])
+                                
+                                cx3Sum = cx3Sum + cx3
+                                cy3Sum = cy3Sum + cy3
+                                
+                                cv2.drawContours(img_yellow, contours3[0], -1, (0,0,255), 2)
+
+                        if len(contours4) > 0:
+                            cnt4 = contours4[0]
+                            hull4 = cv2.convexHull(cnt4)
+                            mmt4 = cv2.moments(hull4)
+                            if mmt4['m00'] > 0:
+                                cx4 = int(mmt4['m10'] / mmt4['m00'])
+                                cy4 = int(mmt4['m01'] / mmt4['m00'])
+                                
+                                cx4Sum = cx4Sum + cx4
+                                cy4Sum = cy4Sum + cy4
+                                
+                                cv2.drawContours(img_yellow, contours4[0], -1, (255,0,0), 2)  
+                                
+                        
+                        #if count >= 50:
+                        area = len(contours2)
+                        if len(contours2) > 0:
+                            cnt2 = contours2[0]
+                            cnt3 = contours2[0]
+                            hull2 = cv2.convexHull(cnt2)
+                            hull3 = cv2.convexHull(cnt3, returnPoints=False)
+                            mmt2 = cv2.moments(hull2)
+                            #mmt2 = cv2.moments(cnt)
+                            tiltData = contours2[0][0][0][0]
+                            
+                            sumtiltData = sumtiltData + tiltData
+                            #area = len(contours2)
+                            
+
+                            if mmt2['m00'] > 0:
+                                cx2 = int(mmt2['m10'] / mmt2['m00'])
+                                cy2 = int(mmt2['m01'] / mmt2['m00'])
+                                
+                                cxSum = cxSum + cx2
+                                cySum = cySum + cy2
+                                #time.sleep(0.0001)
+                    
+                    
+                    
+                    
+                    #print(ttx, tty)
+                    cx2 = int(cxSum / 30)
+                    cy2 = int(cySum / 30)
+                    
+                    cx3 = int(cx3Sum / 30)
+                    cy3 = int(cy3Sum / 30)
+
+                    cx4 = int(cx4Sum / 30)
+                    cy4 = int(cy4Sum / 30)
+                    
+                    #tiltData = int(sumtiltData / 30)
+                    
+                    
+                    if area <= 0:
+                        Serial_L_and_R(26)# ¤\ 0
+                        
+                    else:
+                        if cy2 > 110:
+                            print(cx2, cy2)
+                            print("cy2 < 170")
+                            Serial_L_and_R(26)
+                            
+                        else:
+                            
+                            if cy3 - cy4 >= -10 and cy3 - cy4 <= 10:
+                                print("ok")
+                                num = 1
+                                T2_flag = 1
+                                break
+                                
+                            if cy3 - cy4 < 0 and cy4 - cy3 > 10:
+                                Serial_L_and_R(22)#65
+                                time.sleep(1.5)
+                                print(cy4-cy3)
+                            
+                            elif cy3 - cy4 > 0 and cy3 - cy4 > 10:
+                                Serial_L_and_R(21)#64
+                                time.sleep(1.5)
+                                print(cy3-cy4)
+                                
+                            #else:
+                            #    print("else")    
+                            
+                    
+                    #print(cx2, cy2)
+                    #cv2.drawContours(img_yellow, contours3[0], -1, (0,0,255), 2)        
+                    #cv2.drawContours(img_yellow, contours4[0], -1, (255,0,0), 2)                    
+                    cv2.waitKey(1)
+                    cv2.imshow('line', img_yellow)                    
+                        
+
+            ######################################################
+            
+            else:
+                print(int(psdnum))
+                
+                if int(psdnum) > 180: #and cy2 > 150:
+                    # 8ì ¨X xL ä
+                    #Serial_L_and_R(18)
+                    #T_detectFlag = 1
+                    #print(cx2, cy2)
+                    Serial_L_and_R(17) # $x½ 4
+                    time.sleep(0.5)
+                    Serial_L_and_R(26)
+                    time.sleep(0.5)
+                    Serial_L_and_R(26)
+                    time.sleep(0.5)
+                    #Serial_L_and_R(26)
+                    Serial_L_and_R(26)
+                    time.sleep(0.5)
+                    Serial_L_and_R(26)
+                    time.sleep(0.5)                    
+                    T_detectFlag = 1
+                    #Serial_L_and_R(27)
+                    #while True:
+                    #    pass
+                
+                if area <= 0:
+                    Serial_L_and_R(26)# ¤\ 0
+                                     
+                
+                              
+                if cy2 > 180: #210
+                    #Serial_L_and_R(1)#ä Hp 
+                    #num = 3
+                    print(cx2, cy2)
+                    #break                            
+                    
+                if cx2 > 0 and cx2 <= 135:
+                    Serial_L_and_R(60)#|½ 4
+                    print(cx2,cy2)
+                    
+                elif cx2 >= 185:
+                    Serial_L_and_R(61)#$x½ 4
+                    print(cx2,cy2)
+                else:
+                    #if  cx2 > tiltData and  (cx2-tiltData) > 70:   ## |½<\ 0¸´Ð
+                    #    Serial_L_and_R(58)
+                    #elif cx2 < tiltData and (tiltData-cx2) > 70:   ## $x½<\ 0¸´Ð
+                    #    Serial_L_and_R(59)
+                    
+                    Serial_L_and_R(27)#8ìp
+                    print(cx2,cy2)
+                    time.sleep(0.7)
+                    #print(cx2 - tiltData)
+                
+
+            cv2.waitKey(1)
+            cv2.imshow('line', img_yellow)
+
+        cv2.destroyAllWindows()
+
+
+# .....  num=1  ..........................................................................
+def Line_T2():  # line_T2
+    global num
+    global Serial_stat_old
+    global count
+    
+    T2tilt_flag = 0
+    tiltFlag = 0
+    backFlag = 1
+    
+    video_on = False
+    count = 0
+    
+    Serial_L_and_R(35)#8¬X¥ 80
+    time.sleep(3)
+    
+    while (1):
+        cx1 = -1
+        cy1 = -1
+        cx2 = -1
+        cy2 = -1
+        cx3 = -1
+        cy3 = -1
+        cx4 = -1
+        cy4 = -1
+
+        cx1Sum = 0
+        cy1Sum = 0
+        cxSum = 0
+        cySum = 0
+        cx3Sum = 0
+        cy3Sum = 0
+        cx4Sum = 0
+        cy4Sum = 0        
+        Serial_L_and_R(35)
+        
+        for i in range(30):
+            ret, img_color = cap.read()
+            if not ret:
+                continue
+
+            img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+            img_hsv = cv2.medianBlur(img_hsv, 5)
+
+            y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+            img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+            img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+            
+
+            vertices_1 = np.array([[0, 0], [W_View_size, 0], [W_View_size, H_View_size - 40], [0, H_View_size - 40]], np.int32)
+            roi_1 = roi(img_gray, [vertices_1])
+            contours1, _ = cv2.findContours(roi_1, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+
+            vertices_2 = np.array([[0, 0], [W_View_size, 0], [W_View_size, 60], [0, 60]], np.int32)
+            roi_2 = roi(img_gray, [vertices_2])
+            contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            
+            vertices_3 = np.array([[0, 0], [140, 0], [140, H_View_size], [0, H_View_size]], np.int32)
+            roi_3 = roi(img_gray, [vertices_3])
+            contours3, _ = cv2.findContours(roi_3, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+            vertices_4 = np.array(
+                [[180, 0], [W_View_size, 0], [W_View_size, H_View_size], [180, H_View_size]],
+                np.int32)
+            roi_4 = roi(img_gray, [vertices_4])
+            contours4, _ = cv2.findContours(roi_4, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) 
+
+            if len(contours1) > 0:
+                cnt1 = contours1[0]
+                hull1 = cv2.convexHull(cnt1)
+                mmt1 = cv2.moments(hull1)
+                #video_on = True
+                if mmt1['m00'] > 0:
+                    cx1 = int(mmt1['m10'] / mmt1['m00'])
+                    cy1 = int(mmt1['m01'] / mmt1['m00'])
+                    
+                    cx1Sum = cx1Sum + cx1
+                    cy1Sum = cy1Sum + cy1
+
+
+
+            if len(contours2) > 0:
+                cnt2 = contours2[0]
+                hull2 = cv2.convexHull(cnt2)
+                mmt2 = cv2.moments(hull2)
+                #video_on = True
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    
+                    cxSum = cxSum + cx2
+                    cySum = cySum + cy2
+                    
+                    cv2.drawContours(img_yellow, contours2[0], -1, (0,0,255), 2)            
+            
+            
+            if len(contours3) > 0:
+                cnt3 = contours3[0]
+                hull3 = cv2.convexHull(cnt3)
+                mmt3 = cv2.moments(hull3)
+                video_on = True
+                if mmt3['m00'] > 0:
+                    cx3 = int(mmt3['m10'] / mmt3['m00'])
+                    cy3 = int(mmt3['m01'] / mmt3['m00'])
+                    
+                    cx3Sum = cx3Sum + cx3
+                    cy3Sum = cy3Sum + cy3
+                    
+                    cv2.drawContours(img_yellow, contours3[0], -1, (255,0,0), 2)
+
+            if len(contours4) > 0:
+                cnt4 = contours4[0]
+                hull4 = cv2.convexHull(cnt4)
+                mmt4 = cv2.moments(hull4)
+                if mmt4['m00'] > 0:
+                    cx4 = int(mmt4['m10'] / mmt4['m00'])
+                    cy4 = int(mmt4['m01'] / mmt4['m00'])
+                    
+                    cx4Sum = cx4Sum + cx4
+                    cy4Sum = cy4Sum + cy4
+                    
+                    cv2.drawContours(img_yellow, contours4[0], -1, (0,255,0), 2)
+                    
+            cv2.imshow('line', img_yellow)
+
+        cx1 = int(cx1Sum / 30)
+        cy1 = int(cy1Sum / 30)
+                    
+        cx2 = int(cxSum / 30)
+        cy2 = int(cySum / 30)
+        
+        cx3 = int(cx3Sum / 30)
+        cy3 = int(cy3Sum / 30)
+        
+        cx4 = int(cx4Sum / 30)
+        cy4 = int(cy4Sum / 30)
+        
+                    
+                
+        if T2tilt_flag == 1:
+            
+            if backFlag == 1:
+                
+                if (cy3 > 0 and cy3 < 160) or (cy4 > 0 and cy4 < 160):
+                    backFlag = 0
+                else:
+                    Serial_L_and_R(26)
+            
+            else:
+                
+                if tiltFlag == 1:
+                    if cx1 > 175:
+                        Serial_L_and_R(61)
+                        
+                    elif cx1 < 145:
+                        Serial_L_and_R(60)
+                        
+                    else:
+                        num = 3
+                        break
+            
+                if cy3 - cy4 >= -10 and cy3 - cy4 <= 10:
+                    tiltFlag = 1
+                    #time.sleep(1)
+                    #Serial_L_and_R(26)
+                    #time.sleep(1)
+                    print("ok")
+                    print(cx1)
+                    
+
+                    #num = 3
+                    #T2_flag = 1
+                    #break
+                
+                if tiltFlag == 0:
+                    if cy3 - cy4 < 0 and cy4 - cy3 > 10:
+                        Serial_L_and_R(22)#65
+                        time.sleep(1.5)
+                        print(cy4-cy3)
+                    
+                    elif cy3 - cy4 > 0 and cy3 - cy4 > 10:
+                        Serial_L_and_R(21)#64
+                        time.sleep(1.5)
+                        print(cy3-cy4)
+
+
+
+            
+        
+        else:
+            if len(contours2) > 0:        
+                if cx2 < 110:
+                    Serial_L_and_R(60)
+                    
+                else:
+                    print("ok")
+                    time.sleep(2)
+                    Serial_L_and_R(27)
+                    time.sleep(1)                
+                    Serial_L_and_R(27)
+                    time.sleep(1)
+                    Serial_L_and_R(27)
+                    time.sleep(1)
+                    #Serial_L_and_R(27)
+                    #time.sleep(1)                      
+                    Serial_L_and_R(15)
+                    time.sleep(2)
+                    T2tilt_flag = 1
+                    #num = 3
+                    #break
+                    
+            else:
+                Serial_L_and_R(60)
+                time.sleep(1)
+
+
+
+
+
+
+        #elif video_on:
+            #Serial_L_and_R(26) #GRIP = 1| ½° 0ø8 >> _ÄÄxL(ô1)
+
+        cv2.waitKey(1)
+        cv2.imshow('line', img_yellow)
+
+    cv2.destroyAllWindows()
+
+
+# ....  num=2   .................................................................
+def NSWE():  # NSWE
+    global num
+    global psdnum
+    global count
+    lan_filt = np.zeros(30)
+    lan_rank = np.zeros(30)
+    lan_num = 0
+    w_sum =0
+    w_num =0
+    pause = 0
+    psdnum = 0
+    count = 0
+    time.sleep(1)
+    Serial_L_and_R(9)#8¬ÁXY
+    time.sleep(1)
+    Serial_L_and_R(54)#8¬°Y
+    while True:
+        time.sleep(2)
+        Serial_PSD()
+        if 135 < int(psdnum) < 170:
+            break
+        elif 150 <= int(psdnum):
+            Serial_L_and_R(26)#GRIP = 1| ½° 0ø8 >> _ÄÄxL(ô1)
+        elif 90 < int(psdnum) <= 135:
+            Serial_L_and_R(27)#GRIP = 1| ½° 0ø8 >> _ÄxL(ô1)
+    time.sleep(1)
+    Serial_L_and_R(53)#8¬ä¤@
+    time.sleep(1)
+    Serial_L_and_R(57)#8¬°ä¤@
+    while True:
+        
+        ret, img_color = cap.read()
+        if not ret:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+
+        img_gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY)
+        ret, img_binary = cv2.threshold(img_gray, 50, 255, cv2.THRESH_BINARY_INV)
+
+        
+        kernel = np.ones((3,3), np.uint8)
+        img_binary = cv2.morphologyEx(img_binary, cv2.MORPH_OPEN, kernel)
+        img_binary = cv2.morphologyEx(img_binary, cv2.MORPH_CLOSE, kernel)
+        contours, hierarchy = cv2.findContours(img_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.waitKey(1)
+        cv2.imshow('bianry', img_binary)
+        if count >= 50:
+            if len(contours) > 0:
+                for cnt in contours:
+                    size = len(cnt)
+                    epsilon = 0.005 * cv2.arcLength(cnt, True)
+                    approx = cv2.approxPolyDP(cnt, epsilon, True)
+                    size = len(approx)
+                    cnt = contours[0]
+                    hull = cv2.convexHull(cnt)
+                    x, y, w, h = cv2.boundingRect(hull)
+                    if size <30 :
+                        lan_filt[size]=lan_filt[size]+1
+                        print(str(size),w)
+                    
+                    lan_num = lan_num+1
+                    if  14<=size <=16 :
+                        w_sum = w_sum+w
+                        w_num = w_num+1
+                    if lan_num >100 :
+                        for k in range(0, 30) :
+                            lan_rank[k] = k
+                        for i in range(1,30) :
+                            for j in range(0,i+1) :
+                                if lan_filt[i] >lan_filt[j] :
+                                    middle = lan_filt[i]
+                                    lan_filt[i] = lan_filt[j]
+                                    lan_filt[j] = middle
+                                    middle = lan_rank[i]
+                                    lan_rank[i] = lan_rank[j]
+                                    lan_rank[j] = middle
+                        for i in range(0,5) :
+                            if 27 <= lan_rank[i] <= 30:
+                                print(str(lan_rank[i]) + "S")
+                                Serial_L_and_R(39)
+                                time.sleep(2)
+                                num = 0
+                                lan_num = -1
+                                break
+                        if lan_num == -1 :
+                            break
+                        for i in range(0,5) :
+                            if 14<=lan_rank[i] <=16:
+                                if w_sum/w_num <65 :
+                                    print(str(lan_rank[i]) + "E")
+                                    print(w)
+                                    Serial_L_and_R(37)
+                                    time.sleep(2)
+                                    num = 0
+                                    lan_num = -1
+                                    break
+                                elif w_sum/w_num >= 65 :
+                                    print(str(lan_rank[i]) + "W")
+                                    print(w)
+                                    Serial_L_and_R(38)
+                                    time.sleep(2)
+                                    num = 0
+                                    lan_num = -1
+                                    break
+                            elif 11<= lan_rank[i] <= 13:
+                                print(str(lan_rank[i]) + "N")
+                                Serial_L_and_R(40)
+                                time.sleep(2)
+                                print(w)
+                                num = 0
+                                lan_num = -1
+                                break
+                        if lan_num == -1 :
+                            break
+                             
+                        else:
+                            print(str(lan_rank[i]) + "Error")
+                        lan_num =0
+                        for i in range (0,30) :
+                            lan_filt[i] = 0
+                        break
+                        
+
+        if num != 2:
+            break
+        
+    cv2.destroyAllWindows()
+
+
+
+
+
+# .....   num=3   ..............................................
+def arrow():
+    global num
+    global turn
+    global psdnum
+    global count
+
+    pause = 0
+    count = 0
+    psdnum = 0
+
+    Serial_L_and_R(53)
+    time.sleep(2)
+
+    #while True:
+    #    ret, img_color = cap.read()
+    #    if not ret:
+    #        continue
+    #    cv2.waitKey(1)
+    #    cv2.imshow('bianry', img_color)
+    #    Serial_PSD()
+    #    if 130 < int(psdnum) < 140:
+    #        break
+
+    #    elif 140 <= int(psdnum):
+    #        Serial_L_and_R(26)
+
+    #    elif 90 < int(psdnum) <= 130:
+    #        Serial_L_and_R(27)
+    
+    #time.sleep(2)
+    
+    while True:
+        Serial_L_and_R(53)
+        ret, img_color = cap.read()
+        if not ret:
+            continue
+
+        count += 1
+        img_gray = cv2.cvtColor(img_color, cv2.COLOR_BGR2GRAY)
+
+        rec, img_binary = cv2.threshold(img_gray, 70, 255, cv2.THRESH_BINARY_INV)
+        img_binary = cv2.medianBlur(img_binary, 5)
+        contours, _ = cv2.findContours(img_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if count > 80:
+            if len(contours) > 0:
+                for cnt in contours:
+                    x_r, y_r, w_r, h_r = cv2.boundingRect(cnt)
+                cx_r = x_r + (w_r // 2)
+
+                for cnt in contours:
+                    epsilon = 0.005 * cv2.arcLength(cnt, True)
+                    approx = cv2.approxPolyDP(cnt, epsilon, True)
+                    size = len(approx)
+                    cnt = contours[0]
+                    hull = cv2.convexHull(cnt)
+                    mmt = cv2.moments(hull)
+                    
+                    if mmt['m00'] > 0:
+                        cx = int(mmt['m10'] / mmt['m00'])
+                        cy = int(mmt['m01'] / mmt['m00'])
+                        print(cx, cx_r)
+                        if cx > 220:
+                            Serial_L_and_R(7)
+                        elif cx < 100:
+                            Serial_L_and_R(6)
+                        else:
+                            if cx_r < cx:
+                                Serial_L_and_R(15)
+                                time.sleep(0.5)
+                                Serial_L_and_R(27)
+                                time.sleep(0.5)
+                                Serial_L_and_R(27)                                
+                                num = 0 #4
+                                turn = 'left'
+                                print('left')
+                                break
+                            else:
+                                Serial_L_and_R(17)
+                                time.sleep(0.5)
+                                Serial_L_and_R(65)
+                                time.sleep(0.5)
+                                #Serial_L_and_R(65)
+                                #time.sleep(0.5)
+                                
+                                Serial_L_and_R(27)
+                                time.sleep(0.5)
+                                Serial_L_and_R(27)
+                                time.sleep(0.5)
+                                Serial_L_and_R(27)
+                                time.sleep(0.5)
+                                Serial_L_and_R(27)
+                                Serial_L_and_R(27)
+                                time.sleep(0.5)
+                                Serial_L_and_R(27)
+                                time.sleep(0.5)
+                                Serial_L_and_R(27)                                
+                                
+                                num = 16 #6
+                                turn = 'right'
+                                print('right')
+                                break
+
+                    else:
+                        break
+                if num != 3:
+                    break
+        if num != 3:
+            break
+        cv2.waitKey(1)
+        cv2.imshow('bianry', img_binary)
+
+    cv2.destroyAllWindows()
+
+# *************************************************************
+# *************************************************************
+
+# ....   num=4    ................LEFT....................
+def Line_clock():
+    global num
+    global Serial_stat_old
+    global count
+    global i_p
+    count = 0
+    video_on = False
+    
+    time.sleep(3)
+    Serial_L_and_R(35)
+        
+    while True:
+        ret, img_color = cap.read()
+        if not ret:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+        vertices_2 = np.array(
+            [[0 + 50, 0], [W_View_size - 50, 0], [W_View_size - 50, H_View_size / 2], [0 + 50, H_View_size / 2]],
+            np.int32)
+        roi_2 = roi(img_gray, [vertices_2])
+        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if count >= 50:
+            if len(contours2) > 0:
+                cnt2 = contours2[0]
+                hull2 = cv2.convexHull(cnt2)
+                mmt2 = cv2.moments(hull2)
+                video_on = True
+
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    print(cy2)
+                    if i_p == 3 and cy2 <= 50:
+                        num = 5
+                        break
+                        
+                    if cy2 > 100:
+                        num = 5       
+                        break
+                    if cx2 <= 125:
+                        Serial_L_and_R(6)
+                    elif cx2 >= 205:
+                        Serial_L_and_R(7)
+                    else:
+                        Serial_L_and_R(27)
+                        
+                    if cy2<50:
+                        Serial_L_and_R(27)
+            else:
+                Serial_L_and_R(26)
+
+        cv2.waitKey(1)
+        cv2.imshow('line', img_yellow)
+
+    cv2.destroyAllWindows()
+# ....   num=5    ................LEFT....................
+def Line_clock2():
+    global num
+    global Serial_stat_old
+    global count
+    global i_p
+
+    count = 0
+    
+    time.sleep(3)
+    Serial_L_and_R(35)
+    
+    while (1):
+        ret, img_color = cap.read()
+        if not ret:
+            continue
+        cx2 = -1
+        cy2 = -1
+        cx3 = -1
+        cy3 = -1
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+        vertices_2 = np.array(
+            [[0 + 50, 0], [W_View_size - 50, 0], [W_View_size - 50, H_View_size / 2], [0 + 50, H_View_size / 2]],
+            np.int32)
+        roi_2 = roi(img_gray, [vertices_2])
+        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        vertices_3 = np.array(
+            [[W_View_size, 0], [W_View_size - 50, 0], [W_View_size - 50, H_View_size], [W_View_size, H_View_size]],
+            np.int32)
+        roi_3 = roi(img_gray, [vertices_3])
+        contours3, _ = cv2.findContours(roi_3, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if count >= 50:
+            if len(contours3) > 0:
+                cnt3 = contours3[0]
+                hull3 = cv2.convexHull(cnt3)
+                mmt3 = cv2.moments(hull3)
+                if mmt3['m00'] > 0:
+                    cx3 = int(mmt3['m10'] / mmt3['m00'])
+                    cy3 = int(mmt3['m01'] / mmt3['m00'])
+
+            if len(contours2) > 0:
+                cnt2 = contours2[0]
+                hull2 = cv2.convexHull(cnt2)
+                mmt2 = cv2.moments(hull2)
+
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    print("cy2   ", cy2, "   cy3   ", cy3)
+                    if i_p == 3 and cy3 >= 90:
+                        Serial_L_and_R(1)
+                        print('end')
+                        Serial_L_and_R(17)
+                        num = 0
+                        break
+                    if 5 < cy3 < 60 or cy2 < 85:
+                        num = 4
+                        break
+                    if cx2 <= 165:
+                        if cy3 > 90:
+                            if i_p <3:
+                                Serial_L_and_R(1)
+                                num = 8
+                                break
+                            elif i_p >=3:
+                                Serial_L_and_R(1)
+                                print('end')
+                                Serial_L_and_R(17)
+                                num = 0
+                                break
+                        else:
+                            Serial_L_and_R(14)
+                    elif cx2 >= 245:
+                        if cy3 >= 90:
+                            if i_p <3:
+                                Serial_L_and_R(1)
+                                num = 8
+                                break
+                            elif i_p >=3:
+                                Serial_L_and_R(1)
+                                print('end')
+                                Serial_L_and_R(17)
+                                num = 0
+                                break
+                        else:
+                            Serial_L_and_R(13)
+                    else:
+                        if cy3 >= 90 and cy2 >= 90:
+                            if i_p <3:
+                                Serial_L_and_R(1)
+                                num = 8
+                                break
+                            elif i_p >=3:
+                                Serial_L_and_R(1)
+                                print('end')
+                                Serial_L_and_R(17)
+                                num = 0
+                                break
+                        else:
+                            Serial_L_and_R(26)
+            else:
+                Serial_L_and_R(26)
+
+        cv2.waitKey(1)
+        cv2.imshow('line', img_yellow)
+
+    cv2.destroyAllWindows()
+
+# *************************************************************
+# *************************************************************
+
+# ....   num=6     ...............Right.......................
+def Line_count_clock():
+    global num
+    global Serial_stat_old
+    global count
+    count = 0
+    video_on = False
+    
+    time.sleep(3)
+    Serial_L_and_R(35)
+
+    while True:
+        ret, img_color = cap.read()
+        if not ret:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+        vertices_2 = np.array(
+            [[0 + 50, 0], [W_View_size - 50, 0], [W_View_size - 50, H_View_size / 2], [0 + 50, H_View_size / 2]],
+            np.int32)
+        roi_2 = roi(img_gray, [vertices_2])
+        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if count >= 50:
+            
+            if len(contours2) > 0:
+                cnt2 = contours2[0]
+                hull2 = cv2.convexHull(cnt2)
+                mmt2 = cv2.moments(hull2)
+                video_on = True
+
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    print(cx2, cy2)
+                    
+                    if i_p == 3 and cy2 >= 70:
+                        num = 7
+                        break
+                        
+                    if cy2 > 100:
+                        num = 7
+                        break
+                    
+                    if cx2 <= 125:
+                        Serial_L_and_R(6)
+                    elif cx2 >= 205:
+                        Serial_L_and_R(7)
+                    else:
+                        Serial_L_and_R(27)
+                        
+                    if cy2<50:
+                        Serial_L_and_R(27)
+                        
+            else:
+                Serial_L_and_R(26)
+
+        cv2.waitKey(1)
+        cv2.imshow('line', img_yellow)
+
+    cv2.destroyAllWindows()
+
+# ....   num=7    ................Right....................
+def Line_count_clock2():
+    global num
+    global Serial_stat_old
+    global count
+    global i_p
+
+    count = 0
+    time.sleep(3)
+    Serial_L_and_R(35)
+    while (1):
+        ret, img_color = cap.read()
+        if not ret:
+            continue
+        cx2 = -1
+        cy2 = -1
+        cx3 = -1
+        cy3 = -1
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+        vertices_2 = np.array(
+            [[0 + 50, 0], [W_View_size - 50, 0], [W_View_size - 50, H_View_size / 2], [0 + 50, H_View_size / 2]],
+            np.int32)
+        roi_2 = roi(img_gray, [vertices_2])
+        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        vertices_3 = np.array(
+            [[0, 0], [50, 0], [50, H_View_size], [0, H_View_size]],
+            np.int32)
+        roi_3 = roi(img_gray, [vertices_3])
+        contours3, _ = cv2.findContours(roi_3, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if count >= 50:
+            if len(contours3) > 0:
+                cnt3 = contours3[0]
+                hull3 = cv2.convexHull(cnt3)
+                mmt3 = cv2.moments(hull3)
+                if mmt3['m00'] > 0:
+                    cx3 = int(mmt3['m10'] / mmt3['m00'])
+                    cy3 = int(mmt3['m01'] / mmt3['m00'])
+
+            if len(contours2) > 0:
+                cnt2 = contours2[0]
+                hull2 = cv2.convexHull(cnt2)
+                mmt2 = cv2.moments(hull2)
+
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    print("cy2   ", cy2, "   cy3   ", cy3)
+                    
+                    if i_p == 3 and cy3 >= 90:
+                        Serial_L_and_R(1)
+                        Serial_L_and_R(15)
+                        num = 0
+                        break
+                        
+                    if 5 < cy3 < 60 or cy2 < 85:
+                        num = 6
+                        break
+                        
+                    if cx2 <= 125:
+                        if cy3 > 90:
+                            if i_p <3:
+                                Serial_L_and_R(1)
+                                num = 8
+                                break
+                            elif i_p >=3:
+                                Serial_L_and_R(1)
+                                Serial_L_and_R(15)
+                                num = 0
+                                break
+                        else:
+                            Serial_L_and_R(13)
+                    elif cx2 >= 205:
+                        if cy3 >= 90:
+                            if i_p <3:
+                                Serial_L_and_R(1)
+                                num = 8
+                                break
+                            elif i_p >=3:
+                                Serial_L_and_R(1)
+                                Serial_L_and_R(15)
+                                num = 0
+                                break
+                        else:
+                            Serial_L_and_R(14)
+                    else:
+                        if cy3 >= 90 and cy2 >= 90:
+                            if i_p <3:
+                                Serial_L_and_R(1)
+                                num = 8
+                                break
+                            elif i_p >=3:
+                                Serial_L_and_R(1)
+                                Serial_L_and_R(15)
+                                num = 0
+                                break
+                        else:
+                            Serial_L_and_R(26)
+            else:
+                Serial_L_and_R(26)
+
+        cv2.waitKey(1)
+        cv2.imshow('line', img_yellow)
+
+    cv2.destroyAllWindows()
+
+
+# *************************************************************
+# *************************************************************
+
+# ....   num=8    ...................room name.................
+def ABCD():
+    global num
+    global Serial_stat_old
+    global room
+    global psdnum
+    global count
+    global col
+    
+    red_num = 0
+    blue_num = 0
+    pause = 0
+    psdnum = 0
+    count = 0
+    col = 'none'
+    cx1 = 0
+    cy1 = 0
+    cx2 = 0
+    cy2 = 0
+    areavs1 = 0
+    areavs2 = 0
+    curtime = time.time()
+    prevtime = curtime
+    prevtime2 = curtime
+
+    time.sleep(1)
+    Serial_L_and_R(9)
+    
+    red_filt = np.zeros(50)
+    red_rank = np.zeros(50)
+    blue_filt = np.zeros(50)
+    blue_rank = np.zeros(50)
+    for k in range(0, 50):
+        red_rank[k] = k
+    for k in range(0, 50):
+        blue_rank[k] = k
+
+    while True:
+        curtime = time.time()
+        ret, img_color = cap.read()
+        if not ret:
+            continue
+
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+
+        if r_H_up < r_H_down:
+            R_mask1 = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([180, r_S_up, r_V_up]))
+            R_mask2 = cv2.inRange(img_hsv, np.array([0, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+            R_mask = cv2.addWeighted(R_mask1, 1, R_mask2, 1, 0)
+        else:
+            R_mask = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+        B_mask = cv2.inRange(img_hsv, np.array([b_H_down, b_S_down, b_V_down]), np.array([b_H_up, b_S_up, b_V_up]))
+        ret1, img_red = cv2.threshold(R_mask, 127, 255, 0)
+        ret2, img_blue = cv2.threshold(B_mask, 127, 255, 0)
+        kernel = np.ones((5, 5), np.uint8)
+        img_red = cv2.morphologyEx(img_red, cv2.MORPH_OPEN, kernel)
+        img_red = cv2.morphologyEx(img_red, cv2.MORPH_CLOSE, kernel)
+        #img_blue = cv2.morphologyEx(img_blue, cv2.MORPH_OPEN, kernel)
+        img_blue = cv2.morphologyEx(img_blue, cv2.MORPH_CLOSE, kernel)
+        contours1, _ = cv2.findContours(img_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours2, _ = cv2.findContours(img_blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if count >= 50:
+
+            if len(contours1) > 0:#h
+                areavs1 =0
+                sizevs1 = 0
+                for cnt in contours1:
+                    epsilon = 0.005 * cv2.arcLength(cnt, True)
+                    approx = cv2.approxPolyDP(cnt, epsilon, True)#x 
+                    size = len(approx)
+                    hull1 = cv2.convexHull(cnt)#xÄø¬0
+                    x, y, w, h = cv2.boundingRect(hull1)#xX Á¬
+                    mmt1 = cv2.moments(hull1)
+                    area1 = cv2.contourArea(cnt)
+                    if area1 > areavs1 :
+
+                        areavs1 = area1
+                        sizevs1 = size
+                        #print('size' + str(sizevs1))
+                        mmtvs1 = mmt1
+                    #print('area is ' + str(area1))
+                if sizevs1 < 50:
+                    red_filt[sizevs1] = red_filt[sizevs1] + 1
+                    print(str(sizevs1), str(red_filt[sizevs1]))
+                red_num = red_num + 1
+                prevtime = curtime
+                if red_num > 100:
+
+                    for i in range(1, 50):
+                        for j in range(0, i + 1):
+                            if red_filt[i] > red_filt[j]:
+                                middle = red_filt[i]
+                                red_filt[i] = red_filt[j]
+                                red_filt[j] = middle
+                                middle = red_rank[i]
+                                red_rank[i] = red_rank[j]
+                                red_rank[j] = middle
+
+            if curtime-prevtime >5 :
+                red_num=101
+
+
+            if len(contours2) > 0:#
+                areavs2 =0
+                sizevs2 =0
+                for cnt in contours2:
+                    epsilon = 0.005 * cv2.arcLength(cnt, True)
+                    approx = cv2.approxPolyDP(cnt, epsilon, True)
+                    size = len(approx)
+                    hull2 = cv2.convexHull(cnt)
+                    x, y, w, h = cv2.boundingRect(hull2)
+                    mmt2 = cv2.moments(hull2)
+                    area2 = cv2.contourArea(cnt)
+                    if area2 > areavs2 :
+                        areavs2 = area2
+                        sizevs2 = size
+                        mmtvs2 = mmt2
+                        print(sizevs2)
+                if sizevs2 < 50:
+                    blue_filt[sizevs2] = blue_filt[sizevs2] + 1
+                    print(str(sizevs2), str(blue_filt[sizevs2]))
+                blue_num = blue_num + 1
+                prevtime2 = curtime
+                if blue_num > 100:
+                    for i in range(1, 50):
+                        for j in range(0, i + 1):
+                            if blue_filt[i] > blue_filt[j]:
+                                middle = blue_filt[i]
+                                blue_filt[i] = blue_filt[j]
+                                blue_filt[j] = middle
+                                middle = blue_rank[i]
+                                blue_rank[i] = blue_rank[j]
+                                blue_rank[j] = middle
+
+            if curtime - prevtime2 >5 :
+                blue_num = 101
+
+            if areavs1 > areavs2 and red_num >100 and blue_num >100 :
+                col='red'
+                print('red')
+                for i in range(0, 5):
+                    print(red_rank[i])
+                    
+            elif red_num >100 and blue_num >100 :
+                col = 'blue'
+                print('blue')
+                for i in range(0, 5):
+                    print(blue_rank[i])
+                    print('here')
+                   
+    
+                
+        if col == 'red' :
+            for i in range (0,5) :
+                if 27 <= red_rank[i] <= 29:
+                    room.append('A')
+                    print('A')
+                    num = 9
+                    break
+                elif 15 <= red_rank[i] <= 28:
+                    room.append('B')
+                    print('B')
+                    num = 9
+                    break
+                elif 24 <= red_rank[i] <= 26:
+                    room.append('C')
+                    print('C')
+                    num = 9
+                    break
+                elif 11 <= red_rank[i] <= 13:
+                    room.append('D')
+                    print('D')
+                    num = 9
+                    break
+
+                else:
+                    print(str(size) + "   red_ERROR")
+                    col = 0
+                    red_num =0
+                    red_filt = np.zeros(50)
+                    red_rank = np.zeros(50)
+                    for k in range(0, 50):
+                        red_rank[k] = k
+        elif col == 'blue' :
+            for i in range(0, 5):
+                if 28 <= blue_rank[i] <= 30:
+                    room.append('A')
+                    print('A')
+                    num = 9
+                    break
+                elif 18 <= blue_rank[i] <= 20:
+                    room.append('B')
+                    print('B')
+                    num = 9
+                    break
+                elif 26 <= blue_rank[i] <= 27:
+                    room.append('C')
+                    print('C')
+                    num = 9
+                    break
+                elif 20 <= blue_rank[i] <= 21:
+                    room.append('D')
+                    print('D')
+                    num = 9
+                    break
+                else:
+                    print(str(size) + "   blue_ERROR")
+                    col = 0
+                    blue_num =0
+                    blue_filt = np.zeros(50)
+                    blue_rank = np.zeros(50)
+                    for k in range(0, 50):
+                        blue_rank[k] = k
+        
+
+
+
+        if num != 8:
+            break
+        cv2.waitKey(1)
+        cv2.imshow('result', img_color)
+        cv2.imshow('red', img_red)
+        cv2.imshow('blue', img_blue)
+
+    cv2.destroyAllWindows()
+
+# *************************************************************
+
+# ....   num=9    ...............area.....................
+def area():
+    global num
+    global Serial_stat_old
+    global place
+    global i_p
+    global turn
+    global count
+    global curr_room
+    
+    count = 0
+    
+    time.sleep(1)
+    Serial_L_and_R(33)
+    time.sleep(2)
+    print('here')
+    if turn == 'left':
+        Serial_L_and_R(45)
+    else:
+        Serial_L_and_R(46)
+
+    while True:
+        ret, img_color = cap.read()
+        if not ret:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        G_mask = cv2.inRange(img_hsv, np.array([g_H_down, g_S_down, g_V_down]), np.array([g_H_up, g_S_up, g_V_up]))
+        ret1, img_green = cv2.threshold(G_mask, 127, 255, 0)
+        contours1, _ = cv2.findContours(img_green, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        K_mask = cv2.inRange(img_hsv, np.array([k_H_down, k_S_down, k_V_down]), np.array([k_H_up, k_S_up, k_V_up]))
+        ret2, img_black = cv2.threshold(K_mask, 127, 255, 0)
+        contours2, _ = cv2.findContours(img_black, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if count >= 50:
+            if len(contours1) > 0:
+                for cnt1 in contours1:
+                    area1 = cv2.contourArea(cnt1)
+                    print(area1)
+                    if area1 > 1000:
+                        place.append('s')
+                        print(str(place))
+                        Serial_L_and_R(48)
+                        curr_room = 's'
+                        num = 10
+                        i_p += 1
+                        break
+            
+            elif len(contours2) > 0:
+                for cnt2 in contours2:
+                    area2 = cv2.contourArea(cnt2)
+                    if area2 > 1000:
+                        place.append('u')
+                        print(str(place))
+                        Serial_L_and_R(47)
+                        curr_room = 'u'
+                        num = 10
+                        i_p += 1
+                        break
+            else:
+                Serial_L_and_R(26)
+
+        if num != 9:
+            break
+
+        cv2.waitKey(1)
+        cv2.imshow('result', img_color)
+        cv2.imshow('BLACK', img_black)
+        cv2.imshow('GREEN', img_green)
+
+    cv2.destroyAllWindows()
+
+# *************************************************************
+
+# ....   num=10    ..........box............................
+def box():
+    global num
+    global Serial_stat_old
+    global count
+    global col
+    global turn_num
+
+    face = 0
+    turn_num = 0
+    count = 0
+    
+    time.sleep(1)
+    Serial_L_and_R(33)
+    time.sleep(3)
+    
+    if turn == 'left':
+        Serial_L_and_R(46)
+        time.sleep(2)
+        Serial_L_and_R(46)
+        time.sleep(1.5)
+    else:
+        Serial_L_and_R(45)
+        time.sleep(2)
+        Serial_L_and_R(45)
+        time.sleep(1.5)
+
+    while True:
+        ret, img_color = cap.read()
+        if ret == 0:
+            continue
+
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        if r_H_up < r_H_down:
+            R_mask1 = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([180, r_S_up, r_V_up]))
+            R_mask2 = cv2.inRange(img_hsv, np.array([0, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+            R_mask = cv2.addWeighted(R_mask1, 1, R_mask2, 1, 0)
+        else:
+            R_mask = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+        ret1, red = cv2.threshold(R_mask, 127, 255, 0)
+        img_red = cv2.bitwise_and(img_color, img_color, mask=R_mask)
+        contours1, _ = cv2.findContours(red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        B_mask = cv2.inRange(img_hsv, np.array([b_H_down, b_S_down, b_V_down]), np.array([b_H_up, b_S_up, b_V_up]))
+        ret2, blue = cv2.threshold(B_mask, 127, 255, 0)
+        img_blue = cv2.bitwise_and(img_color, img_color, mask=B_mask)
+        contours2, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if col == 'red' and len(contours1) > 0:
+            cnt1 = contours1[0]
+            area1 = cv2.contourArea(cnt1)
+            if area1 > 500:
+                turn_num = count
+                break
+            else:
+                if turn == 'left':
+                    Serial_L_and_R(13)
+                    count += 1
+                else:
+                    Serial_L_and_R(14)
+                    count += 1
+        elif col == 'blue' and len(contours2) > 0:
+            cnt2 = contours2[0]
+            area2 = cv2.contourArea(cnt2)
+            if area2 > 500:
+                turn_num = count
+                break
+            else:
+                if turn == 'left':
+                    Serial_L_and_R(13)
+                    count += 1
+                else:
+                    Serial_L_and_R(14)
+                    count += 1
+        else:
+            if turn == 'left':
+                Serial_L_and_R(13)
+                count += 1
+            else:
+                Serial_L_and_R(14)
+                count += 1
+
+    cv2.destroyAllWindows()
+    
+    time.sleep(2)
+    count = 0
+
+    while True:
+        ret, img_color = cap.read()
+        if ret == 0:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        if r_H_up < r_H_down:
+            R_mask1 = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([180, r_S_up, r_V_up]))
+            R_mask2 = cv2.inRange(img_hsv, np.array([0, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+            R_mask = cv2.addWeighted(R_mask1, 1, R_mask2, 1, 0)
+        else:
+            R_mask = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+        ret1, red = cv2.threshold(R_mask, 127, 255, 0)
+        img_red = cv2.bitwise_and(img_color, img_color, mask=R_mask)
+        contours1, _ = cv2.findContours(red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        B_mask = cv2.inRange(img_hsv, np.array([b_H_down, b_S_down, b_V_down]), np.array([b_H_up, b_S_up, b_V_up]))
+        ret2, blue = cv2.threshold(B_mask, 127, 255, 0)
+        img_blue = cv2.bitwise_and(img_color, img_color, mask=B_mask)
+        contours2, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if count >= 50:
+            if len(contours1) > 0 and col == 'red':
+                cnt1 = contours1[0]
+                hull1 = cv2.convexHull(cnt1)
+                mmt1 = cv2.moments(hull1)
+
+                if mmt1['m00'] > 0:
+                    cx1 = int(mmt1['m10'] / mmt1['m00'])
+                    cy1 = int(mmt1['m01'] / mmt1['m00'])
+                    # print(area1)
+                    # print(cx1, cy1)
+                    if cx1 < (W_View_size / 2 - 80):
+                        Serial_L_and_R(6)
+                    elif cx1 > (W_View_size / 2 + 80):
+                        Serial_L_and_R(7)
+                    else:
+                        Serial_L_and_R(27)
+                        
+                    if cy1 > 190 and face == 0:
+                        face = 1
+                        break
+                            
+                            
+                    
+            elif len(contours2) > 0 and col == 'blue':
+                for cnt2 in contours2:
+                    cnt2 = contours2[0]
+                    hull2 = cv2.convexHull(cnt2)
+                    mmt2 = cv2.moments(hull2)
+                
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    area2 = cv2.contourArea(cnt2)
+                    if area2 > 50:
+                        # print(area2)
+                        print(cx2, cy2)
+                        if cx2 < (W_View_size / 2 - 80):
+                            Serial_L_and_R(6)
+                        elif cx2 > (W_View_size / 2 + 80):
+                            Serial_L_and_R(7)
+                        else:
+                            Serial_L_and_R(27)
+                        if cy2 > 195 and face == 0:
+                            face = 1
+                            break
+            else:
+                if turn == 'left':
+                    Serial_L_and_R(6)
+                else:
+                    Serial_L_and_R(7)
+                    
+        if num != 10:
+            break
+
+        cv2.waitKey(1)
+        cv2.imshow('BLUE', img_blue)
+        cv2.imshow('RED', img_red)
+
+    cv2.destroyAllWindows()
+    
+    Serial_L_and_R(34)
+    count = 0
+    
+    while True:
+        ret, img_color = cap.read()
+        if ret == 0:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        if r_H_up < r_H_down:
+            R_mask1 = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([180, r_S_up, r_V_up]))
+            R_mask2 = cv2.inRange(img_hsv, np.array([0, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+            R_mask = cv2.addWeighted(R_mask1, 1, R_mask2, 1, 0)
+        else:
+            R_mask = cv2.inRange(img_hsv, np.array([r_H_down, r_S_down, r_V_down]), np.array([r_H_up, r_S_up, r_V_up]))
+        ret1, red = cv2.threshold(R_mask, 127, 255, 0)
+        img_red = cv2.bitwise_and(img_color, img_color, mask=R_mask)
+        contours1, _ = cv2.findContours(red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        B_mask = cv2.inRange(img_hsv, np.array([b_H_down, b_S_down, b_V_down]), np.array([b_H_up, b_S_up, b_V_up]))
+        ret2, blue = cv2.threshold(B_mask, 127, 255, 0)
+        img_blue = cv2.bitwise_and(img_color, img_color, mask=B_mask)
+        contours2, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if count >= 50:
+            if len(contours1) > 0 and col == 'red':
+                cnt1 = contours1[0]
+                hull1 = cv2.convexHull(cnt1)
+                mmt1 = cv2.moments(hull1)
+                area1 = cv2.contourArea(cnt1)
+                if mmt1['m00'] > 0:
+                    cx1 = int(mmt1['m10'] / mmt1['m00'])
+                    cy1 = int(mmt1['m01'] / mmt1['m00'])
+                    # print(area1)
+                    # print(cx1, cy1)
+                    if cx1 < (W_View_size / 2 - 80):
+                        Serial_L_and_R(6)
+                    elif cx1 > (W_View_size / 2 + 80):
+                        Serial_L_and_R(7)
+                    else:
+                        Serial_L_and_R(27)
+                    if cy1 > 195 and face == 1 and area1 > 5000:
+                        time.sleep(2)
+                        Serial_L_and_R(3)
+                        time.sleep(2)
+                        num = 11
+                        break
+
+            else:
+                Serial_L_and_R(27)               
+                            
+                    
+            if len(contours2) > 0 and col == 'blue':
+                for cnt2 in contours2:
+                    area2 = cv2.contourArea(cnt2)
+                    if area2 > 50:
+                        cnt2 = contours2[0]
+                        hull2 = cv2.convexHull(cnt2)
+                        mmt2 = cv2.moments(hull2)
+                
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    
+                    # print(area2)
+                    #print(cx2, cy2)
+                    if cx2 < (W_View_size / 2 - 100):
+                        Serial_L_and_R(6)
+                    elif cx2 > (W_View_size / 2 + 100):
+                        Serial_L_and_R(7)
+                    else:
+                        Serial_L_and_R(27)
+                    if cy2 > 195 and face == 1 and area2 > 5000:
+                        print(cx2, cy2)
+                        time.sleep(2)
+                        Serial_L_and_R(66)
+                        time.sleep(2)
+                        num = 11
+                        break
+            else:
+                 Serial_L_and_R(27)
+        if num != 10:
+            break
+
+        cv2.waitKey(1)
+        cv2.imshow('BLUE', img_blue)
+        cv2.imshow('RED', img_red)
+
+    cv2.destroyAllWindows()
+
+
+# ....   num=11    ..........box_move............................
+def box_move():
+    global num
+    global Serial_stat_old
+    global count
+    global turn_num
+    global curr_room
+    
+    count = 0
+    time.sleep(1)
+    print('#######################################')
+    print(turn_num)
+    print('#######################################')
+
+    if curr_room == 's':
+        
+        while True:
+            ret, img_color = cap.read()
+            if not ret:
+                continue
+            count += 1
+            img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+            img_hsv = cv2.medianBlur(img_hsv, 5)
+            vertices_2 = np.array(
+                [[0 + 80, 0+40], [W_View_size - 80, 0+40], [W_View_size - 80, H_View_size / 2 - 75],
+                 [0 + 80, H_View_size / 2 - 75]],
+                np.int32)
+
+            G_mask = cv2.inRange(img_hsv, np.array([g_H_down, g_S_down, g_V_down]), np.array([g_H_up, g_S_up, g_V_up]))
+            ret1, img_green = cv2.threshold(G_mask, 127, 255, 0)
+            green = cv2.bitwise_and(img_color, img_color, mask=G_mask)
+            roi_g = roi(img_green, [vertices_2])
+            contours1, _ = cv2.findContours(roi_g, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if count >= 50:
+                if len(contours1) > 0:  # safe area
+                    for cnt1 in contours1:
+                        rect = cv2.minAreaRect(cnt1)
+                        box = cv2.boxPoints(rect)
+                        box = np.int0(box)
+                        cnt1 = contours1[0]
+                        hull1 = cv2.convexHull(cnt1)
+                        mmt1 = cv2.moments(hull1)
+
+                    if mmt1['m00'] > 0:
+                        cx1 = int(mmt1['m10'] / mmt1['m00'])
+                        cy1 = int(mmt1['m01'] / mmt1['m00'])
+                        area1 = cv2.contourArea(cnt1)
+                        print(area1, cx1, cy1)
+                        if area1 >= 400 and cy1 <= 47:
+                            if turn =='left':
+                                Serial_L_and_R(50)
+                                time.sleep(2.2)
+                                num = 12
+                                break
+                            else:
+                                Serial_L_and_R(50)
+                                time.sleep(2.2)
+                                num = 13
+                                break
+                        else:
+                            break
+                        
+                else:
+                    break
+
+                if num != 11:
+                    break
+            cv2.imshow('safe',roi_g)
+            cv2.waitKey(1)
+        
+        cv2.destroyAllWindows()
+        
+        count = 0
+        time.sleep(1)
+        Serial_L_and_R(33)
+
+        while num == 11:
+            ret, img_color = cap.read()
+            if not ret:
+                continue
+            count += 1
+            img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+            img_hsv = cv2.medianBlur(img_hsv, 5)
+            vertices_2 = np.array(
+                [[0 + 80, 0+45], [W_View_size - 80, 0+45], [W_View_size - 80, H_View_size / 2 - 70],
+                 [0 + 80, H_View_size / 2 - 70]],
+                np.int32)
+
+            G_mask = cv2.inRange(img_hsv, np.array([g_H_down, g_S_down, g_V_down]), np.array([g_H_up, g_S_up, g_V_up]))
+            ret1, img_green = cv2.threshold(G_mask, 127, 255, 0)
+            green = cv2.bitwise_and(img_color, img_color, mask=G_mask)
+            roi_g = roi(img_green, [vertices_2])
+            contours1, _ = cv2.findContours(roi_g, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if count >= 50:
+                if len(contours1) > 0:  # safe area
+                    for cnt1 in contours1:
+                        rect = cv2.minAreaRect(cnt1)
+                        box = cv2.boxPoints(rect)
+                        box = np.int0(box)
+                        cnt1 = contours1[0]
+                        hull1 = cv2.convexHull(cnt1)
+                        mmt1 = cv2.moments(hull1)
+
+                    if mmt1['m00'] > 0:
+                        cx1 = int(mmt1['m10'] / mmt1['m00'])
+                        cy1 = int(mmt1['m01'] / mmt1['m00'])
+                        area1 = cv2.contourArea(cnt1)
+                        print(area1, cx1, cy1)
+                        if cx1 < 120:
+                            Serial_L_and_R(28)
+                        elif cx1 > 220:
+                            Serial_L_and_R(30)
+                        elif area1 >= 800 and cy1 <= 47:
+                            time.sleep(2)
+                            Serial_L_and_R(4)
+                            time.sleep(3)
+                            Serial_L_and_R(50)
+                            if turn =='left':
+                                num = 12
+                                break
+                            else:
+                                num = 13
+                                break
+                        else:
+                            if turn_num > 100:
+                                if turn == 'left':
+                                    Serial_L_and_R(30)
+                                else:
+                                    Serial_L_and_R(28)
+                            else:
+                                if turn == 'left':
+                                    Serial_L_and_R(28)
+                                else:
+                                    Serial_L_and_R(30)
+
+                else:
+                    if turn_num > 100:
+                        if turn == 'left':
+                            Serial_L_and_R(30)
+                        else:
+                            Serial_L_and_R(28)
+                    else:
+                        if turn == 'left':
+                            Serial_L_and_R(28)
+                        else:
+                            Serial_L_and_R(30)
+
+                if num != 11:
+                    Serial_L_and_R(1)
+                    break
+            cv2.imshow('safe',roi_g)
+            cv2.waitKey(1)
+
+        
+    if curr_room == 'u':
+        count = 0
+        Serial_L_and_R(35)
+        while True:
+            ret, img_color = cap.read()
+            if not ret:
+                continue
+            count += 1
+            img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+            img_hsv = cv2.medianBlur(img_hsv, 5)
+            vertices_2 = np.array(
+                [[0, 0], [W_View_size, 0], [W_View_size, H_View_size / 2 + 40],
+                 [0, H_View_size / 2 + 40]],
+                np.int32)
+
+            K_mask = cv2.inRange(img_hsv, np.array([k_H_down, k_S_down, k_V_down]), np.array([k_H_up, k_S_up, k_V_up]))
+            ret2, img_black = cv2.threshold(K_mask, 127, 255, 0)
+            black = cv2.bitwise_and(img_color, img_color, mask=K_mask)
+            roi_k = roi(img_black, [vertices_2])
+            contours2, _ = cv2.findContours(roi_k, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if count >= 50:
+                if len(contours2) > 0:  # unsafe area
+                    for cnt2 in contours2:
+                        rect = cv2.minAreaRect(cnt2)
+                        box = cv2.boxPoints(rect)
+                        box = np.int0(box)
+                        cnt2 = contours2[0]
+                        hull2 = cv2.convexHull(cnt2)
+                        mmt2 = cv2.moments(hull2)
+
+                    if mmt2['m00'] > 0:
+                        cx2 = int(mmt2['m10'] / mmt2['m00'])
+                        cy2 = int(mmt2['m01'] / mmt2['m00'])
+                        area2 = cv2.contourArea(cnt2)
+                        print('cy2:', cy2, 'area:', area2)
+                        Serial_L_and_R(31)
+                        if 2000 < area2 < 5000 and cy2 < 50:
+                            Serial_L_and_R(31)
+                            tcount = 0
+                            while True:
+                                if cx2 <= 180:
+                                    Serial_L_and_R(30)
+                                else:
+                                    Serial_L_and_R(28)
+
+                                if tcount == 1000:
+                                    break
+                                tcount += 1
+                                print(tcount)
+                            Serial_L_and_R(50)
+                            if turn == 'left':
+                                num = 12
+                                break
+                            else:
+                                num = 13
+                                break
+                            
+                else:
+                    Serial_L_and_R(31)
+                    time.sleep(2)
+                    Serial_L_and_R(50)
+                    if turn == 'left':
+                        num = 12
+                        break
+                    else:
+                        num = 13
+                        break
+                    
+            if num != 11:
+                Serial_L_and_R(1)
+                break
+        
+            cv2.waitKey(1)
+            cv2.imshow('safe',roi_k)
+            
+    cv2.destroyAllWindows()
+
+# .....  num=12  ..........................................................................
+def Line_back_L():  
+    global num
+    global Serial_stat_old
+    global count
+    global i_p
+    global psdnum
+
+    count = 0
+    brk = False
+    
+    time.sleep(3)
+    Serial_L_and_R(52)
+    
+    while True:
+        ret, img_color = cap.read()
+        
+        if not ret:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+        vertices_2 = np.array(
+            [[0, 0], [W_View_size, 0], [W_View_size, H_View_size/2], [0, H_View_size/2]],
+            np.int32)
+        roi_2 = roi(img_gray, [vertices_2])
+        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        
+        if count >= 50:
+            if len(contours2) > 0:
+                for cnt2 in contours2:
+                    area2 = cv2.contourArea(cnt2)
+                    if area2 > 1000:
+                        hull2 = cv2.convexHull(cnt2)
+                        mmt2 = cv2.moments(hull2)
+                        time.sleep(2)
+                        Serial_L_and_R(7)
+                        brk = True
+                        break
+                    else:
+                        continue
+            else:
+                Serial_L_and_R(46)
+                            
+        if brk:
+            break
+            
+        cv2.waitKey(1)
+
+    cv2.destroyAllWindows()
+    print(i_p)
+    count = 0
+    brk = False
+    
+    time.sleep(1.5)
+    Serial_L_and_R(52)
+    time.sleep(1.5)
+    Serial_L_and_R(51)
+    time.sleep(1.5)
+    
+    while True:
+        ret, img_color = cap.read()
+        
+        if not ret:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+        vertices_2 = np.array(
+            [[0, 0], [W_View_size-120, 0], [W_View_size-120, H_View_size/2], [0, H_View_size/2]],
+            np.int32)
+        roi_2 = roi(img_gray, [vertices_2])
+        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if count >= 50:
+            if len(contours2) > 0:
+                cnt2 = contours2[0]
+                hull2 = cv2.convexHull(cnt2)
+                mmt2 = cv2.moments(hull2)
+
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    cv2.imshow('roi_2', roi_2)
+                    Sending(cy2)
+                else:
+                    Sending(0)
+            else:
+                Sending(0)
+        if psdnum == 1:
+            if i_p>=3:
+                num = 6
+                break
+            else:
+                num = 4
+                break
+            break
+        cv2.waitKey(1)
+        cv2.imshow('line', img_yellow)
+    cv2.destroyAllWindows()
+    
+
+# .....  num=13  ..........................................................................
+def Line_back_R():  
+    global num
+    global Serial_stat_old
+    global count
+    global i_p
+    global psdnum
+
+    count = 0
+    brk = False
+    
+    time.sleep(3)
+    Serial_L_and_R(52)
+    
+    while True:
+        ret, img_color = cap.read()
+        
+        if not ret:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+        vertices_2 = np.array(
+            [[0, 0], [W_View_size, 0], [W_View_size, H_View_size/2], [0, H_View_size/2]],
+            np.int32)
+        roi_2 = roi(img_gray, [vertices_2])
+        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        
+        if count >= 50:
+            if len(contours2) > 0:
+                for cnt2 in contours2:
+                    area2 = cv2.contourArea(cnt2)
+                    if area2 > 1000:
+                        hull2 = cv2.convexHull(cnt2)
+                        mmt2 = cv2.moments(hull2)
+                        time.sleep(2)
+                        Serial_L_and_R(6)
+                        brk = True
+                        break
+                    else:
+                        continue
+            else:
+                Serial_L_and_R(45)
+                            
+        if brk:
+            break
+            
+        cv2.waitKey(1)
+
+    cv2.destroyAllWindows()
+    
+    print(i_p)
+    count = 0
+    brk = False
+    
+    time.sleep(1.5)
+    Serial_L_and_R(52)
+    time.sleep(1.5)
+    Serial_L_and_R(51)
+    time.sleep(1.5)
+    
+    while True:
+        ret, img_color = cap.read()
+        
+        if not ret:
+            continue
+        count += 1
+        img_hsv = cv2.cvtColor(img_color, cv2.COLOR_BGR2HSV)
+        img_hsv = cv2.medianBlur(img_hsv, 5)
+
+        y_mask = cv2.inRange(img_hsv, np.array([y_H_down, y_S_down, y_V_down]), np.array([y_H_up, y_S_up, y_V_up]))
+        img_yellow = cv2.bitwise_and(img_color, img_color, mask=y_mask)
+
+        img_gray = cv2.cvtColor(img_yellow, cv2.COLOR_BGR2GRAY)
+        vertices_2 = np.array(
+            [[120, 0], [W_View_size, 0], [W_View_size, H_View_size/2], [120, H_View_size/2]],
+            np.int32)
+        roi_2 = roi(img_gray, [vertices_2])
+        contours2, _ = cv2.findContours(roi_2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if count >= 50:
+            if len(contours2) > 0:
+                cnt2 = contours2[0]
+                hull2 = cv2.convexHull(cnt2)
+                mmt2 = cv2.moments(hull2)
+
+                if mmt2['m00'] > 0:
+                    cx2 = int(mmt2['m10'] / mmt2['m00'])
+                    cy2 = int(mmt2['m01'] / mmt2['m00'])
+                    cv2.imshow('roi_2', roi_2)
+                    Sending(cy2)
+                else:
+                    Sending(0)
+            else:
+                Sending(0)
+        if psdnum == 1:
+            if i_p>=3:
+                time.sleep(1.5)
+                Sending(7)
+                num = 4
+                break
+            else:
+                time.sleep(1.5)
+                Sending(6)
+                num = 6
+                break
+        cv2.waitKey(1)
+        cv2.imshow('line', img_yellow)
+    cv2.destroyAllWindows()
+    # .....  num=14  ..........................................................................
+def out():  # out
+    global num
+    global Serial_stat_old
+    global count
+    global room
+    global place
+    global mode_count
+    
+    Serial_L_and_R(1)
+    time.sleep(0.5)
+    Serial_L_and_R(9)
+    time.sleep(1)
+    
+    
+    while True:
+        for i in range(len(place)):
+            # if room color is black
+            if place[i] == 'u':
+                if room[i] == 'A':
+                    Serial_L_and_R(41)
+                elif room[i] == 'B':
+                    Serial_L_and_R(42)
+                elif room[i] == 'C':
+                    Serial_L_and_R(43)
+                elif room[i] == 'D':
+                    Serial_L_and_R(44)
+                else:
+                    pass
+                time.sleep(1)
+        num = 15
+        break
+    
+   
+    
+    
+# ***************************************************************
+# ************main*********************************
+if __name__ == '__main__':
+    BPS = 4800  # 4800,9600,14400, 19200,28800, 57600, 115200
+
+    serial_port = serial.Serial('/dev/ttyS0', BPS, timeout=0.01)
+    serial_port.flush()  # serial cls
+    
+    serial_t = Thread(target=Receiving, args=(serial_port,))
+    serial_t.daemon = True
+    serial_t.start()
+    
+    global num
+    global i_p
+    global turn
+    global room
+    global curr_room
+    global place
+    global psdnum
+    num = 8
+    i_p = 0
+    room = []
+    place = []
+    turn = 'none'
+
+    print("start")
+    
+    while True:
+        if num == 0:
+            print('Mode: Line_T')
+            Line_T()
+        elif num == 1:
+            print('Mode: Line_T2')
+            Line_T2()
+        elif num == 2:
+            print('Mode: NSWE')
+            NSWE()
+        elif num == 3:
+            print('Mode: arrow')
+            arrow()
+        elif num == 4:
+            print('Mode: Line_clock')
+            Line_clock()
+        elif num == 5:
+            print('Mode: Line_clock2')
+            Line_clock2()
+        elif num == 6:
+            print('Mode: Line_count_clock')
+            Line_count_clock()
+        elif num == 7:
+            print('Mode: Line_count_clock2')
+            Line_count_clock2()
+        elif num == 8:
+            print('Mode: ABCD')
+            ABCD()
+        elif num == 9:
+            print('Mode: area')
+            area()
+        elif num == 10:
+            print('Mode: box')
+            box()
+        elif num == 11:
+            print('Mode: box_move')
+            box_move()
+        elif num == 12:
+            print('Mode: line_back_L')
+            Line_back_L()
+        elif num == 13:
+            print('Mode: line_back_R')
+            Line_back_R()
+        elif num == 14:
+            print('Mode: out')
+            out()
+        
+        elif num == 16:
+            print('Mode: Line_giok')
+            Line_giok()
+            
+        elif num == 15:
+            break
+
+    cv2.destroyAllWindows()
+# **********************************************************
+# **********************************************************            
+
